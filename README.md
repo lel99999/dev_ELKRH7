@@ -16,3 +16,9 @@ By default, the stack exposes the following ports: <br/>
 - 9200: Elasticsearch HTTP
 - 9300: Elasticsearch TCP transport
 - 5601: Kibana
+
+***SELINUX*** <br/>
+On distributions which have SELinux enabled out-of-the-box you will need to either re-context the files or set SELinux into Permissive mode in order for docker-elk to start properly. For example on Redhat and CentOS, the following will apply the proper context:NUX*** <br/>
+```
+$chcon -R system_u:object_r:admin_home_t:s0 docker-elk/
+```
