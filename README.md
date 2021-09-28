@@ -22,3 +22,17 @@ On distributions which have SELinux enabled out-of-the-box you will need to eith
 ```
 $chcon -R system_u:object_r:admin_home_t:s0 docker-elk/
 ```
+#### Elastic Search
+- /etc/elasticsearch/elasticsearch.yml <br/>
+```
+network.host: <localhost>
+```
+Restart Elasticsearch:<br/>
+```
+$sudo systemctl enable elasticsearch
+```
+
+Test Elasticsearch service bin sending HTTP request: <br/>
+```
+$curl -x GET "localhost:9200"
+```
