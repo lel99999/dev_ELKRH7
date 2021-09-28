@@ -36,3 +36,24 @@ Test Elasticsearch service bin sending HTTP request: <br/>
 ```
 $curl -x GET "localhost:9200"
 ```
+YOu should see: <br/>
+```
+Output
+{
+  "name" : "8oSCBFJ",
+  "cluster_name" : "elasticsearch",
+  "cluster_uuid" : "1Nf9ZymBQaOWKpMRBfisog",
+  "version" : {
+    "number" : "6.5.2",
+    "build_flavor" : "default",
+    "build_type" : "rpm",
+    "build_hash" : "9434bed",
+    "build_date" : "2018-11-29T23:58:20.891072Z",
+    "build_snapshot" : false,
+    "lucene_version" : "7.5.0",
+    "minimum_wire_compatibility_version" : "5.6.0",
+    "minimum_index_compatibility_version" : "5.0.0"
+  },
+  "tagline" : "You Know, for Search"
+}
+```
