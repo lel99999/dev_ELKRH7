@@ -32,6 +32,7 @@ Restart Elasticsearch:<br/>
 $sudo systemctl enable elasticsearch
 ```
 
+#### Update
 Test Elasticsearch service bin sending HTTP request: <br/>
 ```
 $curl -x GET "localhost:9200"
