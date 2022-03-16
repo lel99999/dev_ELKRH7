@@ -18,9 +18,13 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   #
   config.vm.provider "docker" do |d|
     d.build_dir = "."
+#   d.cmd = ["/sbin/init", "--enable-insecure-key"]
     d.has_ssh = true
   end
   config.ssh.port = 22
+  config.vm.network :forwarded_port, guest: 22, host: 2522, auto_correct: false, id: "ssh"
+# config.ssh.username = "root"
+# config.ssh.private_key_path = "./insecure_key"
 
   # config.vm.provision "puppet" do |puppet|
   #   puppet.manifests_path = "manifests"
