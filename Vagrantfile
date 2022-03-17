@@ -23,6 +23,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   end
   config.ssh.port = 22
   config.vm.network :forwarded_port, guest: 22, host: 2522, auto_correct: false, id: "ssh"
+  config.vm.network "forwarded_port", guest: 80, host: 8080
 # config.ssh.username = "root"
 # config.ssh.private_key_path = "./insecure_key"
 

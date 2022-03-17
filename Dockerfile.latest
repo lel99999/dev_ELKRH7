@@ -52,7 +52,7 @@ CMD ["/usr/sbin/sshd", "-D"]
 ##     && apt-get update \
 ##     && apt-get install puppet -y
 
-EXPOSE 22
+#EXPOSE 22
 
 #RUN mkdir -p /var/run/sshd
 #RUN chmod 0755 /var/run/sshd
