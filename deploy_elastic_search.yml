@@ -1,0 +1,12 @@
+---
+- hosts: elasticsearch
+  become: yes
+  become_method: sudo
+  roles:
+    - {role: common, when: "install_glusterfs"}
+    - {role: puppet_disable, when: "disable_puppet"}
+    - {role: iptables, when: "iptables_config"}
+    - {role: epel, when: "use_epel and not 'production' in group_names"}
+    - elasticsearch
+    - {role: log-courier, when: "install_logstash"}
+    - elasticsearch-config
