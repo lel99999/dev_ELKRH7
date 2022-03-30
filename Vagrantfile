@@ -27,33 +27,47 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 # config.ssh.username = "root"
 # config.ssh.private_key_path = "./insecure_key"
 
-  # config.vm.provision "puppet" do |puppet|
-  #   puppet.manifests_path = "manifests"
-  #   puppet.manifest_file  = "site.pp"
-  # end
+  # Kibana Client Node
+  config.vm.define "elk" do |elk_config|
+    elk_config.vm.box = "bento/centos-6.10"
+    elk_config.vm.host_name = "elk.test.dev"
+    elk_config.ssh.forward_agent = true
 
-  # config.vm.provision "chef_solo" do |chef|
-  #   chef.cookbooks_path = "../my-recipes/cookbooks"
-  #   chef.roles_path = "../my-recipes/roles"
-  #   chef.data_bags_path = "../my-recipes/data_bags"
-  #   chef.add_recipe "mysql"
-  #   chef.add_role "web"
-  #
-  #   # You may also specify custom JSON attributes:
-  #   chef.json = { :mysql_password => "foo" }
-  # end
+    elk_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
 
-  # config.vm.provision "chef_client" do |chef|
-  #   chef.chef_server_url = "https://api.opscode.com/organizations/ORGNAME"
-  #   chef.validation_key_path = "ORGNAME-validator.pem"
-  # end
-  #
-  # If you're using the Opscode platform, your validator client is
-  # ORGNAME-validator, replacing ORGNAME with your organization name.
-  #
-  # If you have your own Chef Server, the default validation client name is
-  # chef-validator, unless you changed the configuration.
-  #
-  #   chef.validation_client_name = "ORGNAME-validator"
+    elk_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_elk.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    elk_config.vm.network :private_network, ip: "10.0.1.16"
+  end
+
+  # Elastic Search Cluster
+  (1..3).each do |i|
+    config.vm.define "es#{i}" do |es_config|
+      es_config.vm.box = "bento/centos-6.10"
+      es_config.vm.host_name = "es#{i}.test.dev"
+      es_config.ssh.forward_agent = true
+
+      es_config.vm.provision :shell,
+        :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+      es_config.vm.provision "ansible" do |ansible|
+        ansible.playbook = "deploy_elastic_search.yml"
+        ansible.inventory_path = "vagrant_hosts"
+        ansible.tags = ansible_tags
+        ansible.verbose = ansible_verbosity
+        ansible.extra_vars = ansible_extra_vars
+        ansible.limit = ansible_limit
+      end
+
+      es_config.vm.network :private_network, ip: "10.0.1.#{i+12}"
+    end
 end
 

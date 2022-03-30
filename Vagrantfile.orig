@@ -1,0 +1,862 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+require 'fileutils'
+
+Vagrant.configure(2) do |config|
+
+  ### COMMON VARIABLES
+
+  # First make sure that an .vault_password file exists, and if it doesn't
+  # then create an empty file
+  if not File.file?('.vault_password')
+    FileUtils.touch('.vault_password')
+  end
+
+  # Constant var holding the root directory where this vagrantfile is being run
+  VAGRANT_ROOT = File.dirname(File.expand_path(__FILE__))
+  ansible_tags = ENV['TAGS']
+  ansible_verbosity = ENV['V']
+  if ENV['EXTRA_VARS']
+    ansible_extra_vars = eval(ENV['EXTRA_VARS'])
+  else
+    ansible_extra_vars = {}
+  end
+  ansible_limit = ENV['LIMIT']
+
+  ########################
+  ### SHARED COMPONENT ###
+  ########################
+
+  # GlusterFS File Server 1
+  disk_file_1 = File.join(VAGRANT_ROOT, 'gfs_brick_1.vdi')
+  config.vm.define :file_server_1 do |fs_config|
+    fs_config.vm.box = "bento/centos-6.10"
+    fs_config.vm.host_name = "file-server-1.test.dev"
+
+    fs_config.ssh.forward_agent = true
+
+    fs_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    fs_config.vm.provider 'virtualbox' do |v|
+      unless File.exist?(disk_file_1)
+        v.customize ['createhd', '--filename', disk_file_1, '--size', 2048, '--variant', 'fixed']
+
+#       v.customize ['storagectl', :id, '--name', 'SATA Controller', '--add', 'sata', '--portcount', 1]
+#       TODO: Detect if SATA controller exists, and only add it if needed
+
+        v.customize ['storageattach', :id, '--storagectl', 'SATA Controller', '--port', 1, '--device', 0, '--type', 'hdd', '--medium', disk_file_1]
+      end
+    end
+
+    fs_config.vm.provision 'ansible' do |ansible|
+      ansible.playbook = "deploy_file_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    fs_config.vm.network :private_network, ip: "10.0.1.4"
+  end
+
+  # GlusterFS File Server 2
+  disk_file_2 = File.join(VAGRANT_ROOT, 'gfs_brick_2.vdi')
+  config.vm.define :file_server_2 do |fs_config|
+    fs_config.vm.box = "bento/centos-6.10"
+    fs_config.vm.host_name = "file-server-2.test.dev"
+
+    fs_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    fs_config.vm.provider 'virtualbox' do |v|
+      unless File.exist?(disk_file_2)
+        v.customize ['createhd', '--filename', disk_file_2, '--size', 2048, '--variant', 'fixed']
+
+#       v.customize ['storagectl', :id, '--name', 'SATA Controller', '--add', 'sata', '--portcount', 1]
+#       TODO: Detect if SATA controller exists, and only add it if needed
+#
+        v.customize ['storageattach', :id, '--storagectl', 'SATA Controller', '--port', 1, '--device', 0, '--type', 'hdd', '--medium', disk_file_2]
+      end
+    end
+
+    fs_config.ssh.forward_agent = true
+
+    fs_config.vm.provision 'ansible' do |ansible|
+      ansible.playbook = "deploy_file_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    fs_config.vm.provision 'ansible' do |ansible|
+      ansible.playbook = "config_file_server.yml"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    fs_config.vm.network :private_network, ip: "10.0.1.5"
+  end
+
+  # Admin Terminal VM
+  config.vm.define :admin_terminal do |adterm_config|
+    adterm_config.vm.box = "bento/centos-6.10"
+    adterm_config.vm.host_name = "admin.test.dev"
+
+    adterm_config.ssh.forward_agent = true
+
+    adterm_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    adterm_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_admin_terminal.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    adterm_config.vm.network :private_network, ip: "10.0.1.2"
+  end
+
+  # Kerberos Server VM - for testing purposes only
+  config.vm.define :kerberos_server do |kerberos_config|
+    kerberos_config.vm.box = "bento/centos-6.10"
+    kerberos_config.vm.host_name = "kdc.test.dev"
+
+    kerberos_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.3  proxy.test.dev' >> /etc/hosts"
+
+    kerberos_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    kerberos_config.ssh.forward_agent = true
+
+    kerberos_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_kerberos_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    kerberos_config.vm.network :private_network, ip: "10.0.1.127"
+  end
+
+  # Enclave Proxy VM
+  if ENV.has_key?('PROXY_VARS')
+    proxy_extra_vars = {}
+    for var in ENV['PROXY_VARS'].split(' ')
+      key, value = var.split('=')
+      proxy_extra_vars[key] = value
+    end
+  end
+
+  config.vm.define :proxy_server do |proxy_config|
+    proxy_config.vm.box = "bento/centos-6.10"
+    proxy_config.vm.host_name = "proxy.test.dev"
+
+    proxy_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.127  kdc.test.dev' >> /etc/hosts"
+
+    proxy_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.3  proxy.test.dev' >> /etc/hosts"
+
+    proxy_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    proxy_config.ssh.forward_agent = true
+
+    proxy_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_proxy_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.extra_vars = proxy_extra_vars
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    proxy_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "config_proxy_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    proxy_config.vm.network :private_network, ip: "10.0.1.3"
+  end
+
+  # NGINX proxy config
+  config.vm.define :nginx_server do |proxy_config|
+    proxy_config.vm.box = "bento/centos-6.10"
+    proxy_config.vm.host_name = "nginx-proxy.test.dev"
+
+    proxy_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.127  kdc.test.dev' >> /etc/hosts"
+
+    proxy_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.128  nginx-proxy.test.dev' >> /etc/hosts"
+
+    proxy_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    proxy_config.ssh.forward_agent = true
+
+    proxy_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_nginx_proxy_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    proxy_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "config_nginx_proxy_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    proxy_config.vm.network :private_network, ip: "10.0.1.128"
+  end
+
+  ###########################
+  ### ANALYTICS COMPONENT ###
+  ###########################
+
+  # Analytics Terminal
+  config.vm.define :analytics_terminal do |analytics_config|
+    analytics_config.vm.box = "bento/centos-6.10"
+    analytics_config.vm.host_name = "analytics.test.dev"
+
+    analytics_config.ssh.forward_agent = true
+
+    analytics_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    analytics_config.vm.provider "virtualbox" do |v|
+      v.memory = 2048
+      v.cpus = 2
+    end
+
+    analytics_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_analytics_terminal.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    analytics_config.vm.network :private_network, ip: "10.0.1.12"
+  end
+
+  # Kibana Client Node
+  config.vm.define "elk" do |elk_config|
+    elk_config.vm.box = "bento/centos-6.10"
+    elk_config.vm.host_name = "elk.test.dev"
+    elk_config.ssh.forward_agent = true
+
+    elk_config.vm.provision :shell,
+      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+    elk_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_elk.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    elk_config.vm.network :private_network, ip: "10.0.1.16"
+  end
+
+  # Elastic Search Cluster
+  (1..3).each do |i|
+    config.vm.define "es#{i}" do |es_config|
+      es_config.vm.box = "bento/centos-6.10"
+      es_config.vm.host_name = "es#{i}.test.dev"
+      es_config.ssh.forward_agent = true
+
+      es_config.vm.provision :shell,
+        :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+
+      es_config.vm.provision "ansible" do |ansible|
+        ansible.playbook = "deploy_elastic_search.yml"
+        ansible.inventory_path = "vagrant_hosts"
+        ansible.tags = ansible_tags
+        ansible.verbose = ansible_verbosity
+        ansible.extra_vars = ansible_extra_vars
+        ansible.limit = ansible_limit
+      end
+
+      es_config.vm.network :private_network, ip: "10.0.1.#{i+12}"
+    end
+  end
+
+  # App server
+  config.vm.define :app_server do |app_config|
+    app_config.vm.box = "bento/centos-6.10"
+    app_config.vm.host_name = "app.test.dev"
+
+    app_config.ssh.forward_agent = true
+
+    app_config.vm.provider "virtualbox" do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+
+    app_config.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_app_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    app_config.vm.network :private_network, ip: "10.0.1.17"
+  end
+
+  ##########################
+  ### RESEARCH COMPONENT ###
+  ##########################
+
+  # Research ancillary server
+  config.vm.define :research_ancillary_services do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-ancillary.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.18"
+  end
+
+  # Research EOD server
+  config.vm.define :research_eod do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-eod.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.19"
+  end
+
+  # Research EOD Redhat 7 server
+  config.vm.define :research_eod7 do |server|
+    server.vm.box = "clouddood/RH7.5_baserepo"
+    server.vm.host_name = "research-eod7.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_eod7.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.51"
+  end
+
+  # Research gauss server
+  config.vm.define :research_gauss do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-gauss.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.20"
+  end
+
+  # Research stata server
+  config.vm.define :research_stata do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-stata.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.21"
+  end
+
+  # Research R/Python server
+  config.vm.define :research_python do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-python.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.22"
+  end
+
+  # Research Matlab server
+  config.vm.define :research_matlab do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-matlab.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.23"
+  end
+
+  # Research SPSS server
+  config.vm.define :research_spss do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-spss.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.24"
+  end
+
+  # Research SAS server
+  config.vm.define :research_sas do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "research-sas.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_research_environment.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.25"
+  end
+
+  ###########################
+  ### PIPELINES COMPONENT ###
+  ###########################
+
+  config.vm.define :ci_server do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "ci-server.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_gocd.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.26"
+  end
+
+  config.vm.define :ci_agent_1 do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "ci-agent-1.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_gocd.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.27"
+  end
+
+  config.vm.define :ci_terminal_1 do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "ci-terminal-1.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_gocd.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.28"
+  end
+
+  ################################
+  ### DATA WAREHOUSE COMPONENT ###
+  ################################
+
+  # DB Server (EDB)
+  config.vm.define :db_server_edb do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "db-edb.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provider "virtualbox" do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+
+    server.vm.provision "ansible" do |ansible|
+      if ENV['DB_SERVER_EXTRA_VARS']
+        db_server_extra_vars = ENV['DB_SERVER_EXTRA_VARS']
+      else
+        print "To use the db_server_edb VM, set the DB_SERVER_EXTRA_VARS environment variable to the name of a local YAML file that contains pp_web_username (email addresses only) and pp_web_password as well as 'install_edb' flag set to true.\n"
+        print "Example:\n"
+        print "$ export DB_SERVER_EXTRA_VARS=local_settings.yml\n"
+        print "$ cat local_settings.yml\n"
+        print "---\n"
+        print "pp_web_username: myusername@example.com\n"
+        print "pp_web_password: mypassword\n"
+        print "install_edb: True\n"
+      end
+
+      ansible.playbook = "deploy_db_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.29"
+  end
+
+  # DB Server (opensource centos 6)
+  config.vm.define :db_server_centos6 do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "db-centos6.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provider "virtualbox" do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+
+    server.vm.provision "ansible" do |ansible|
+
+      ansible.playbook = "deploy_db_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.39"
+  end
+
+  # DB Server (opensource centos 7)
+  config.vm.define :db_server_centos7 do |server|
+    server.vm.box = "centos/7"
+    server.vm.host_name = "db-centos7.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provider "virtualbox" do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+
+    server.ssh.insert_key = false
+    server.vm.provision "shell", inline: <<-SHELL
+      # bug with vagrant 1.9+ and centos/7
+      sudo ifup eth1
+    SHELL
+
+    server.vm.provision "ansible" do |ansible|
+      ansible_extra_vars = ansible_extra_vars.merge({
+        jre_lib_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/jre/lib",
+        java_home_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/"
+      })
+      ansible.playbook = "deploy_db_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.38"
+  end
+
+  # Citus Coordinator
+  config.vm.define "citus_coordinator" do |cc_config|
+    cc_config.vm.box = "centos/7"
+    cc_config.vm.host_name = "citus-coordinator.test.dev"
+    cc_config.vm.network :private_network, ip: "10.0.1.40"
+
+    cc_config.ssh.forward_agent = true
+    cc_config.ssh.insert_key = false
+    cc_config.vm.provision "shell", inline: <<-SHELL
+      # bug with vagrant 1.9+ and centos/7
+      sudo ifup eth1
+    SHELL
+
+    cc_config.vm.provision "ansible" do |ansible|
+      ansible_extra_vars = ansible_extra_vars.merge({
+        jre_lib_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/jre/lib",
+        java_home_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/",
+        pp_shared_preload_libraries: "citus"
+      })
+      ansible.playbook = "deploy_citus_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+  end
+
+  # Citus Coordinator standby
+  config.vm.define "citus_coordinator_standby" do |cc_config|
+    cc_config.vm.box = "centos/7"
+    cc_config.vm.host_name = "citus-coordinator-standby.test.dev"
+    cc_config.vm.network :private_network, ip: "10.0.1.44"
+
+    cc_config.ssh.forward_agent = true
+    cc_config.ssh.insert_key = false
+    cc_config.vm.provision "shell", inline: <<-SHELL
+      # bug with vagrant 1.9+ and centos/7
+      sudo ifup eth1
+    SHELL
+
+    cc_config.vm.provision "ansible" do |ansible|
+      ansible_extra_vars = ansible_extra_vars.merge({
+        jre_lib_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/jre/lib",
+        java_home_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/",
+        pp_shared_preload_libraries: "citus"
+      })
+      ansible.playbook = "deploy_citus_server.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+  end
+
+  # Citus Workers
+  citus_workers = [
+    "10.0.1.41",
+    "10.0.1.42",
+    "10.0.1.43",
+  ]
+
+  citus_workers.each_with_index do |ip, idx|
+    id = idx+1
+    config.vm.define "citus_worker_#{id}" do |cw_config|
+      cw_config.vm.box = "centos/7"
+      cw_config.vm.host_name = "citus-worker-#{id}.test.dev"
+      cw_config.vm.network :private_network, ip: ip
+
+      cw_config.ssh.insert_key = false
+      cw_config.ssh.forward_agent = true
+      cw_config.ssh.insert_key = false
+      cw_config.vm.provision "shell", inline: <<-SHELL
+        # bug with vagrant 1.9+ and centos/7
+        sudo ifup eth1
+      SHELL
+
+      cw_config.vm.provision "ansible" do |ansible|
+        ansible_extra_vars = ansible_extra_vars.merge({
+          jre_lib_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/jre/lib",
+          java_home_path: "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.201.b09-2.el7_6.x86_64/",
+          pp_shared_preload_libraries: "citus"
+        })
+        ansible.playbook = "deploy_citus_server.yml"
+        ansible.inventory_path = "vagrant_hosts"
+        ansible.tags = ansible_tags
+        ansible.verbose = ansible_verbosity
+        ansible.extra_vars = ansible_extra_vars
+        ansible.limit = ansible_limit
+      end
+    end
+  end
+
+  # DB Terminal
+  config.vm.define :db_terminal do |server|
+    server.vm.box = "bento/centos-6.10"
+    server.vm.host_name = "dbt.test.dev"
+
+    server.ssh.forward_agent = true
+
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "deploy_db_terminal.yml"
+      ansible.inventory_path = "vagrant_hosts"
+      ansible.tags = ansible_tags
+      ansible.verbose = ansible_verbosity
+      ansible.extra_vars = ansible_extra_vars
+      ansible.limit = ansible_limit
+    end
+
+    server.vm.network :private_network, ip: "10.0.1.30"
+  end
+
+  # Neo4J Server
+  config.vm.define :neo4j1 do |neo4j_config|
+    neo4j_config.vm.box = "bento/centos-6.10"
+    neo4j_config.vm.host_name = "neo4j.test.dev"
+
+    neo4j_config.ssh.forward_agent = true
+
+    neo4j_config.vm.provider "virtualbox" do |v|
+     v.memory = 1024
+     v.cpus = 1
+    end
+
+    neo4j_config.vm.provision "ansible" do |ansible|
+     ansible.playbook = "deploy_neo4j_server.yml"
+     ansible.inventory_path = "vagrant_hosts"
+     ansible.tags = ansible_tags
+     ansible.verbose = ansible_verbosity
+     ansible.limit = ansible_limit
+    end
+
+    neo4j_config.vm.network :private_network, ip: "10.0.1.37"
+  end
+
+
+  #######################
+  ### MESOS COMPONENT ###
+  #######################
+
+  mesos_masters = [
+    "10.0.1.31",
+    "10.0.1.32",
+    "10.0.1.33",
+  ]
+
+  mesos_masters.each_with_index do |ip, idx|
+    id = idx+1
+    config.vm.define "mesos_master_#{id}" do |mm_config|
+      mm_config.vm.box = "bento/centos-6.10"
+      mm_config.vm.host_name = "mesos-master-#{id}.test.dev"
+      mm_config.vm.network :private_network, ip: ip
+
+      mm_config.ssh.forward_agent = true
+
+      mm_config.vm.provision "ansible" do |ansible|
+        ansible.playbook = "deploy_mesos_master.yml"
+        ansible.inventory_path = "vagrant_hosts"
+        ansible.extra_vars = {:zookeeper_id => "#{id}"}
+        ansible.tags = ansible_tags
+        ansible.verbose = ansible_verbosity
+        ansible.extra_vars = ansible_extra_vars
+        ansible.limit = ansible_limit
+      end
+    end
+  end
+
+  # Mesos Agents
+  mesos_agents = [
+    "10.0.1.34",
+    "10.0.1.35",
+    "10.0.1.36",
+  ]
+
+  mesos_agents.each_with_index do |ip, idx|
+    id = idx+1
+    config.vm.define "mesos_agent_#{id}" do |mm_config|
+      mm_config.vm.box = "bento/centos-6.10"
+      mm_config.vm.host_name = "mesos-agent-#{id}.test.dev"
+      mm_config.vm.network :private_network, ip: ip
+
+      mm_config.ssh.forward_agent = true
+
+      mm_config.vm.provision "ansible" do |ansible|
+        ansible.playbook = "deploy_mesos_agent.yml"
+        ansible.inventory_path = "vagrant_hosts"
+        ansible.tags = ansible_tags
+        ansible.verbose = ansible_verbosity
+        ansible.extra_vars = ansible_extra_vars
+        ansible.limit = ansible_limit
+      end
+    end
+  end
+end
