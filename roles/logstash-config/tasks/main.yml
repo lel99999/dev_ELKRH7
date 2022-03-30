@@ -1,0 +1,69 @@
+---
+- name: Setup logstash-courier input
+  template:
+    src: 01-logstash-courier-input.conf
+    dest: /etc/logstash/conf.d/01-logstash-courier-input.conf
+  when: install_logstash
+  notify:
+    - restart logstash
+
+- name: Setup syslog filter
+  template:
+    src: 10-syslog.conf
+    dest: /etc/logstash/conf.d/10-syslog.conf
+  notify:
+    - restart logstash
+
+#- name: Setup Elasticsearch filter
+#  template:
+#    src: 20-elasticsearch-input.conf.j2
+#    dest: /etc/logstash/conf.d/20-elasticsearch-input.conf
+
+- name: Setup elasticsearch output
+  template:
+    src: "{{ logstash_es_output_file }}"
+    dest: /etc/logstash/conf.d/30-elasticsearch-output.conf
+  notify:
+    - restart logstash
+
+- name: Add custom filters
+  copy:
+    dest: "/etc/logstash/conf.d/{{ item.name }}"
+    content: "{{ item.content }}"
+    mode: 0644
+  with_items: "{{ logstash_filters }}"
+
+- name: Ensure permissions are correct
+  shell: "chmod 644 /etc/logstash/conf.d/*"
+  notify:
+    - restart logstash
+
+- name: Test Logstash configuration
+  shell: /opt/logstash/bin/logstash --configtest
+  register: logstash_configtest
+
+- name: Ensure logstash is started
+  service:
+    name: logstash
+    state: started
+    enabled: yes
+
+- name: Set recursive admin permissions on log folders
+  acl:
+    path: "{{ item }}"
+    entity: "{{ restricted_group_name }}"
+    etype: group
+    permissions: rX
+    recursive: yes
+    state: present
+  with_items: "{{ logstash_log_file_locations }}"
+
+- name: Set default admin permissions on log folders
+  acl:
+    path: "{{ item }}"
+    entity: "{{ restricted_group_name }}"
+    etype: group
+    permissions: rX
+    default: yes
+    state: present
+  with_items: "{{ logstash_log_file_locations }}"

@@ -1,0 +1,50 @@
+---
+- name: Add elasticsearch key
+  rpm_key:
+    key: https://packages.elasticsearch.org/GPG-KEY-elasticsearch
+    state: present
+  when: not "production" in group_names
+
+- name: Enable Logstash repo
+  template:
+    src: logstash.repo
+    dest: /etc/yum.repos.d/logstash.repo
+  when: not "production" in group_names
+
+- name: Install logstash and other needed packages
+  yum:
+    name: "{{ item }}"
+    state: latest
+  with_items:
+    - logstash
+
+- name: Ensure that logstash user is able to login to a shell
+  user:
+    name: "{{ logstash_user }}"
+    shell: /bin/bash
+
+- name: Install log-courier plugin
+  shell: 'su logstash -c "/opt/logstash/bin/plugin install logstash-input-courier"'
+  when: install_logstash
+  notify:
+    - restart logstash
+
+- name: Install logstash-output-elasticsearch plugin
+  shell: 'su logstash -c "/opt/logstash/bin/plugin install logstash-output-elasticsearch"'
+  notify:
+    - restart logstash
+
+- name: Remove sgroups because it doesn't work with Active Directory
+  lineinfile:
+    dest: /etc/init.d/logstash
+    line: >
+      #SGROUPS=$(id -Gn "$LS_USER") | tr " " "," | sed 's/,$//'; echo '')"
+    regexp: (.*)SGROUPS=(.*)
+
+- name: Open port 5043:5044 in iptables
+  command: "iptables -I {{ iptables_chain }} 3 -m state --state NEW -p tcp --dport 5043:5044 -j ACCEPT"
+  when: iptables_config
+
+- name: Save rules
+  command: "/sbin/service iptables save"
+  when: iptables_config

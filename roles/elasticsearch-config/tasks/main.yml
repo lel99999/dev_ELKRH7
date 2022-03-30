@@ -1,0 +1,183 @@
+---
+- name: Setup limits for elasticsearch
+  template:
+    src: 99-elasticsearch.conf.j2
+    dest: /etc/security/limits.d/99-elasticsearch.conf
+    mode: 0644
+  notify:
+    - restart elasticsearch
+
+- name: Configure elasticsearch startup script
+  template:
+    src: elasticsearch.j2
+    dest: /etc/sysconfig/elasticsearch
+  notify:
+    - restart elasticsearch
+
+- name: Configure elasticsearch
+  template:
+    src: elasticsearch.yml.j2
+    dest: /etc/elasticsearch/elasticsearch.yml
+  notify:
+    - restart elasticsearch
+
+- name: Configure logging
+  template:
+    src: logging.yml.j2
+    dest: /etc/elasticsearch/logging.yml
+  notify:
+    - restart elasticsearch
+
+# Install Plugins
+- name: Updating the nss package may be required
+  yum:
+    name: nss
+    state: latest
+
+- name: Uninstall all existing plugins
+  command: /usr/share/elasticsearch/bin/plugin {{ es_plugin_uninstall_cmd }} {{ item.plugin_name }}{% if proxy_host %} -DproxyHost={{ proxy_host }}{% endif %}{% if proxy_port %} -DproxyPort={{ proxy_port }}{% endif %}
+  environment:
+    ES_JAVA_OPTS: "-Des.path.conf=/etc/elasticsearch"
+  with_items: "{{ es_plugins }}"
+  notify:
+    - restart elasticsearch
+
+- name: Uninstall all existing plugins
+  command: /usr/share/elasticsearch/bin/plugin {{ es_plugin_uninstall_cmd }} {{ item }}{% if proxy_host %} -DproxyHost={{ proxy_host }}{% endif %}{% if proxy_port %} -DproxyPort={{ proxy_port }}{% endif %}
+  environment:
+    ES_JAVA_OPTS: "-Des.path.conf=/etc/elasticsearch"
+  with_items:
+    - kopf
+    - shield
+    - license
+  notify:
+    - restart elasticsearch
+
+- name: Install the license plugin
+  command: /usr/share/elasticsearch/bin/plugin {{ es_plugin_install_cmd }} {{ es_license_version }}{% if proxy_host %} -DproxyHost={{ proxy_host }}{% endif %}{% if proxy_port %} -DproxyPort={{ proxy_port }}{% endif %}
+  register: license_result
+  failed_when: license_result.rc != 0 and "already exists" not in license_result.stdout
+  environment:
+    ES_JAVA_OPTS: "-Des.path.conf=/etc/elasticsearch"
+  notify:
+    - restart elasticsearch
+
+- name: Install the Shield plugin
+  command: /usr/share/elasticsearch/bin/plugin {{ es_plugin_install_cmd }} {{ es_shield_version }}{% if proxy_host %} -DproxyHost={{ proxy_host }}{% endif %}{% if proxy_port %} -DproxyPort={{ proxy_port }}{% endif %}
+  register: shield_result
+  failed_when: shield_result.rc != 0 and "already exists" not in shield_result.stdout
+  environment:
+    ES_JAVA_OPTS: "-Des.path.conf=/etc/elasticsearch"
+  notify:
+    - restart elasticsearch
+
+- name: Install kopf
+  command: /usr/share/elasticsearch/bin/plugin {{ es_plugin_install_cmd }} lmenezes/elasticsearch-kopf{% if proxy_host %} -DproxyHost={{ proxy_host }}{% endif %}{% if proxy_port %} -DproxyPort={{ proxy_port }}{% endif %}
+  args:
+    creates: /usr/share/elasticsearch/plugins/kopf/_site/index.html
+
+- name: Install the additional ES plugins
+  command: /usr/share/elasticsearch/bin/plugin {{ es_plugin_install_cmd }} {{ item.plugin_name }}{% if proxy_host %} -DproxyHost={{ proxy_host }}{% endif %}{% if proxy_port %} -DproxyPort={{ proxy_port }}{% endif %}
+  args:
+    creates: "{{ item.plugin_path }}"
+  with_items: "{{ es_plugins }}"
+  notify:
+    - restart elasticsearch
+
+- name: Ensure file permissions for ES plugins are correct
+  shell: "chmod a+r {{ item.plugin_path }} -R"
+  with_items: "{{ es_plugins }}"
+  notify:
+    - restart elasticsearch
+
+- name: Ensure directory permissions for ES plugins are correct
+  file:
+    path: "{{ item.plugin_path }}"
+    mode: a+x
+    recurse: yes
+    state: directory
+  with_items: "{{ es_plugins }}"
+  notify:
+    - restart elasticsearch
+
+# Configure Shield
+
+- name: Generate the roles file
+  template:
+    src: "{{ es_shield_roles_file }}"
+    dest: /etc/elasticsearch/shield/roles.yml
+  notify:
+    - restart elasticsearch
+
+- name: Load in user file to test for admin user
+  command: "cat /etc/elasticsearch/shield/users"
+  register: users_file
+  when: not use_active_directory
+
+- name: Generate the role mappings file
+  template:
+    src: role_mapping.yml.j2
+    dest: /etc/elasticsearch/shield/role_mapping.yml
+  when: use_active_directory
+  notify:
+    - restart elasticsearch
+
+- name: Create users from config file
+  command: "/usr/share/elasticsearch/bin/shield/esusers useradd {{ item.username }} -p {{ item.password }} -r {{ item.roles }}"
+  when: "not use_active_directory and '{{ item.username }}' not in users_file.stdout"
+  environment:
+    ES_JAVA_OPTS: "-Des.path.conf=/etc/elasticsearch"
+  with_items: "{{ es_users }}"
+  notify:
+    - restart elasticsearch
+
+- name: Configure audit logging
+  template:
+    src: shield_logging.yml.j2
+    dest: /etc/elasticsearch/shield/logging.yml
+    mode: 0640
+  notify:
+    - restart elasticsearch
+
+# Message Authentication Settings
+
+- name: Stat key file
+  stat:
+    path: /etc/elasticsearch/shield/system_key
+  register: system_key
+  when: es_message_auth_enabled
+
+- name: Copy key to each node
+  copy:
+    src: ./system_key
+    dest: /etc/elasticsearch/shield/system_key
+    owner: elasticsearch
+    group: elasticsearch
+    mode: 0600
+  when: es_message_auth_enabled and not system_key.stat.exists
+
+- name: Start elasticsearch
+  service:
+    name: elasticsearch
+    state: started
+    enabled: yes
+
+- name: Set recursive admin permissions on log folders
+  acl:
+    path: "{{ item }}"
+    entity: "{{ restricted_group_name }}"
+    etype: group
+    permissions: rX
+    recursive: yes
+    state: present
+  with_items: "{{ es_log_file_locations }}"
+
+- name: Set default admin permissions on log folders
+  acl:
+    path: "{{ item }}"
+    entity: "{{ restricted_group_name }}"
+    etype: group
+    permissions: rX
+    default: yes
+    state: present
+  with_items: "{{ es_log_file_locations }}"

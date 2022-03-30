@@ -1,0 +1,64 @@
+---
+- name: Install libselinux-python
+  yum:
+    name: libselinux-python
+    state: present
+
+- name: Enable log-courier repo
+  template:
+    src: log-courier.repo
+    dest: /etc/yum.repos.d/log-courier.repo
+#  when: not custom_repo
+
+- name: Install log-courier
+  yum:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - zeromq3
+    - zeromq3-devel
+    - log-courier
+  when: '"elk" in groups'
+
+- name: Install configuration template
+  template:
+    src: log-courier.conf.j2
+    dest: /etc/log-courier/log-courier.conf
+  when: '"elk" in groups'
+
+- name: Make log directory
+  file:
+    dest: /var/log/log-courier/
+    state: directory
+
+- name: Start and enable log-courier
+  service:
+    name: log-courier
+    state: started
+    enabled: yes
+  when: '"elk" in groups'
+
+- name: Create admin group
+  group:
+    name: "{{ restricted_group_name }}"
+    state: present
+
+- name: Create empty log files if they don't exist
+  file:
+    path: "{{ item }}"
+    state: touch
+    owner: root
+    group: root
+    mode: 0640
+  with_items: "{{ logcourier_log_file_locations }}"
+
+- name: Allow admins to read logs
+  acl:
+    path: "{{ item }}"
+    entity: "{{ restricted_group_name }}"
+    etype: group
+    permissions: rX
+    recursive: yes
+    state: present
+  with_items: "{{ logcourier_log_file_locations }}"
+
