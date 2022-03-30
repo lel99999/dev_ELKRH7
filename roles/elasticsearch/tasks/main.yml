@@ -1,0 +1,66 @@
+---
+# TODO: Move this to /etc/sysctl.d/elasticsearch.conf
+- name: Minimize swapping
+  lineinfile:
+    name: /etc/sysctl.conf
+    line: vm.swappiness=1
+    regexp: (.*)vm.swappiness=(.*)
+
+- name: Install elasticsearch GPG key
+  rpm_key:
+    key: https://packages.elasticsearch.org/GPG-KEY-elasticsearch
+    state: present
+
+- name: Setup elasticsearch repo
+  template:
+    src: elasticsearch.repo
+    dest: /etc/yum.repos.d/elasticsearch.repo
+  when: not "production" in group_names
+
+- name: Install elasticsearch
+  yum:
+    name: elasticsearch-{{ es_full_version }}
+    state: present
+
+- name: Create elasticsearch data directory
+  file:
+    dest: "{{ es_data_directory }}"
+    state: directory
+    owner: "{{ es_user }}"
+    group: "{{ es_user }}"
+
+- name: Configure ES config path
+  copy:
+    dest: /etc/profile.d/elasticsearch.sh
+    content: 'export ES_JAVA_OPTS="-Des.path.conf=/etc/elasticsearch"'
+
+#- name: Make sure shield directory has proper permissions
+#  shell: "chmod 755 /etc/elasticsearch/shield"
+#  notify:
+#    - restart elasticsearch
+
+#- name: Make sure shield files have the proper permissions
+#  shell: "chmod 644 /etc/elasticsearch/shield/*"
+#  notify:
+#    - restart elasticsearch
+
+- name: Open ports for Elasticsearch transport communication
+  command: "iptables -I {{ iptables_chain }} 3 -m state --state NEW -p tcp --dport {{ es_transport_ports }} -j ACCEPT"
+  when: iptables_config
+
+- name: Open ports for Elasticsearch http communication
+  command: "iptables -I {{ iptables_chain }} 3 -m state --state NEW -p tcp --dport {{ es_http_ports }} -s {{ hostvars[groups['proxy_server'][0]]['ansible_ssh_host'] }} -j ACCEPT"
+  when: iptables_config and 'proxy_server' in groups
+
+- name: Save rules
+  command: "/sbin/service iptables save"
+  when: iptables_config
+
+# Install license key manually for now
+#- name: Install the license key
+#  shell: curl -XPUT -u {{ es_admin_user }} 'http://localhost:9200/_licenses' -d '{{ license_json }}' && touch /usr/share/elasticsearch/license_loaded
+#  args:
+#    creates: /usr/local/elasticsearch/license_loaded
+#  when: license_json is defined
+#  notify:
+#    - restart elasticsearch
