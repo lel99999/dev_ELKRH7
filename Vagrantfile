@@ -39,10 +39,10 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     elk_config.vm.provision "ansible" do |ansible|
       ansible.playbook = "deploy_elk.yml"
       ansible.inventory_path = "vagrant_hosts"
-      ansible.tags = ansible_tags
-      ansible.verbose = ansible_verbosity
-      ansible.extra_vars = ansible_extra_vars
-      ansible.limit = ansible_limit
+#     ansible.tags = ansible_tags
+#     ansible.verbose = ansible_verbosity
+#     ansible.extra_vars = ansible_extra_vars
+#     ansible.limit = ansible_limit
     end
 
     elk_config.vm.network :private_network, ip: "10.0.1.16"
@@ -61,13 +61,15 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       es_config.vm.provision "ansible" do |ansible|
         ansible.playbook = "deploy_elastic_search.yml"
         ansible.inventory_path = "vagrant_hosts"
-        ansible.tags = ansible_tags
-        ansible.verbose = ansible_verbosity
-        ansible.extra_vars = ansible_extra_vars
-        ansible.limit = ansible_limit
+#       ansible.tags = ansible_tags
+#       ansible.verbose = ansible_verbosity
+#       ansible.extra_vars = ansible_extra_vars
+#       ansible.limit = ansible_limit
       end
 
       es_config.vm.network :private_network, ip: "10.0.1.#{i+12}"
     end
+  end
+
 end
 
