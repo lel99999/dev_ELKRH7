@@ -36,7 +36,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     elk_config.ssh.forward_agent = true
 
     elk_config.vm.provision :shell,
-      :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+      :inline => "sudo echo '192.168.56.16  elk.test.dev' >> /etc/hosts"
+#     :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
 
     elk_config.vm.provision "ansible" do |ansible|
       ansible.playbook = "deploy_elk.yml"
@@ -47,7 +48,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 #     ansible.limit = ansible_limit
     end
 
-    elk_config.vm.network :private_network, ip: "10.0.1.16"
+    elk_config.vm.network :private_network, ip: "192.168.56.16"
+#   elk_config.vm.network :private_network, ip: "10.0.1.16"
   end
 
   # Elastic Search Cluster
@@ -59,7 +61,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       es_config.ssh.forward_agent = true
 
       es_config.vm.provision :shell,
-        :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
+        :inline => "sudo echo '192.168.56.16  elk.test.dev' >> /etc/hosts"
+#       :inline => "sudo echo '10.0.1.16  elk.test.dev' >> /etc/hosts"
 
       es_config.vm.provision "ansible" do |ansible|
         ansible.playbook = "deploy_elastic_search.yml"
@@ -70,7 +73,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 #       ansible.limit = ansible_limit
       end
 
-      es_config.vm.network :private_network, ip: "10.0.1.#{i+12}"
+      es_config.vm.network :private_network, ip: "192.168.56.#{i+12}"
+#     es_config.vm.network :private_network, ip: "10.0.1.#{i+12}"
     end
   end
 
