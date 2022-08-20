@@ -32,7 +32,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # Kibana Client Node
   config.vm.define "elk" do |elk_config|
 #   elk_config.vm.box = "bento/centos-6.10"
-    elk_config.vm.box = "clouddood/RH7.5_baserepo"
+#   elk_config.vm.box = "clouddood/RH7.5_baserepo"
+    elk_config.vm.box = "clouddood/RH7.9_infra"
     elk_config.vm.host_name = "elk.test.dev"
     elk_config.ssh.forward_agent = true
 
@@ -57,7 +58,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   (1..3).each do |i|
     config.vm.define "es#{i}" do |es_config|
 #     es_config.vm.box = "bento/centos-6.10"
-      es_config.vm.box = "clouddood/RH7.5_baserepo"
+#     es_config.vm.box = "clouddood/RH7.5_baserepo"
+      es_config.vm.box = "clouddood/RH7.9_infra"
       es_config.vm.host_name = "es#{i}.test.dev"
       es_config.ssh.forward_agent = true
 
